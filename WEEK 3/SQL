@@ -1,0 +1,82 @@
+DELIMITER $$
+
+CREATE PROCEDURE ProcessMonthlyInterest()
+BEGIN
+    UPDATE Accounts
+    SET balance = balance * 1.01
+    WHERE account_type = 'Savings';
+END$$
+
+DELIMITER ;
+
+
+DELIMITER $$
+
+CREATE PROCEDURE ProcessMonthlyInterest(IN p_interest_rate DECIMAL(5,4))
+BEGIN
+    UPDATE Accounts
+    SET balance = balance * (1 + p_interest_rate)
+    WHERE account_type = 'Savings';
+END$$
+
+DELIMITER ;
+
+DELIMITER $$
+
+CREATE PROCEDURE UpdateEmployeeBonus(
+    IN p_department VARCHAR(50),
+    IN p_bonus_percentage DECIMAL(5,2)
+)
+BEGIN
+    UPDATE Employees
+    SET salary = salary + (salary * p_bonus_percentage / 100)
+    WHERE department = p_department;
+END$$
+
+DELIMITER ;
+
+
+DELIMITER $$
+
+CREATE PROCEDURE TransferFunds(
+    IN p_from_account INT,
+    IN p_to_account INT,
+    IN p_amount DECIMAL(15,2)
+)
+BEGIN
+    DECLARE v_source_balance DECIMAL(15,2);
+    DECLARE EXIT HANDLER FOR SQLEXCEPTION
+    BEGIN
+        ROLLBACK;
+        RESIGNAL;
+    END;
+
+    START TRANSACTION;
+
+    -- Lock the source row so concurrent transfers can't overdraw it
+    SELECT balance INTO v_source_balance
+    FROM Accounts
+    WHERE account_id = p_from_account
+    FOR UPDATE;
+
+    IF v_source_balance IS NULL THEN
+        SIGNAL SQLSTATE '45000'
+            SET MESSAGE_TEXT = 'Source account does not exist.';
+    ELSEIF v_source_balance < p_amount THEN
+        SIGNAL SQLSTATE '45000'
+            SET MESSAGE_TEXT = 'Insufficient balance in source account.';
+    ELSE
+        UPDATE Accounts
+        SET balance = balance - p_amount
+        WHERE account_id = p_from_account;
+
+        UPDATE Accounts
+        SET balance = balance + p_amount
+        WHERE account_id = p_to_account;
+
+        COMMIT;
+    END IF;
+END$$
+
+DELIMITER ;
+

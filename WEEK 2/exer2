@@ -1,0 +1,181 @@
+CREATE TABLE ErrorLog (
+    error_id        NUMBER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    error_date      DATE DEFAULT SYSDATE,
+    procedure_name  VARCHAR2(50),
+    error_message   VARCHAR2(500)
+);
+
+CREATE TABLE Accounts (
+    account_id      NUMBER PRIMARY KEY,
+    account_holder  VARCHAR2(50),
+    balance         NUMBER
+);
+
+CREATE TABLE Employees (
+    employee_id     NUMBER PRIMARY KEY,
+    employee_name   VARCHAR2(50),
+    salary          NUMBER
+);
+
+CREATE TABLE Customers (
+    customer_id     NUMBER PRIMARY KEY,
+    customer_name   VARCHAR2(50),
+    balance         NUMBER
+);
+
+CREATE OR REPLACE PROCEDURE SafeTransferFunds (
+    p_from_account IN NUMBER,
+    p_to_account   IN NUMBER,
+    p_amount       IN NUMBER
+) IS
+    v_from_balance  Accounts.balance%TYPE;
+    e_insufficient_funds EXCEPTION;
+    e_invalid_account    EXCEPTION;
+BEGIN
+    -- Check sender's balance exists
+    BEGIN
+        SELECT balance INTO v_from_balance
+        FROM Accounts
+        WHERE account_id = p_from_account;
+    EXCEPTION
+        WHEN NO_DATA_FOUND THEN
+            RAISE e_invalid_account;
+    END;
+
+    -- Check sufficient funds
+    IF v_from_balance < p_amount THEN
+        RAISE e_insufficient_funds;
+    END IF;
+
+    -- Deduct from sender
+    UPDATE Accounts
+    SET balance = balance - p_amount
+    WHERE account_id = p_from_account;
+
+    -- Add to receiver (will fail if account_id doesn't exist due to 0 rows updated)
+    UPDATE Accounts
+    SET balance = balance + p_amount
+    WHERE account_id = p_to_account;
+
+    IF SQL%ROWCOUNT = 0 THEN
+        RAISE e_invalid_account;
+    END IF;
+
+    COMMIT;
+    DBMS_OUTPUT.PUT_LINE('Transfer successful: $' || p_amount ||
+                          ' moved from Account ' || p_from_account ||
+                          ' to Account ' || p_to_account);
+
+EXCEPTION
+    WHEN e_insufficient_funds THEN
+        ROLLBACK;
+        INSERT INTO ErrorLog (procedure_name, error_message)
+        VALUES ('SafeTransferFunds',
+                'Insufficient funds in Account ' || p_from_account ||
+                ' for transfer of $' || p_amount);
+        COMMIT;
+        DBMS_OUTPUT.PUT_LINE('Error: Insufficient funds in Account ' || p_from_account);
+
+    WHEN e_invalid_account THEN
+        ROLLBACK;
+        INSERT INTO ErrorLog (procedure_name, error_message)
+        VALUES ('SafeTransferFunds',
+                'Invalid account number(s): ' || p_from_account || ' or ' || p_to_account);
+        COMMIT;
+        DBMS_OUTPUT.PUT_LINE('Error: One or both account numbers are invalid.');
+
+    WHEN OTHERS THEN
+        ROLLBACK;
+        INSERT INTO ErrorLog (procedure_name, error_message)
+        VALUES ('SafeTransferFunds', 'Unexpected error: ' || SQLERRM);
+        COMMIT;
+        DBMS_OUTPUT.PUT_LINE('Error: An unexpected error occurred. Transaction rolled back.');
+END;
+/
+
+CREATE OR REPLACE PROCEDURE UpdateSalary (
+    p_employee_id IN NUMBER,
+    p_percentage  IN NUMBER
+) IS
+    v_old_salary   Employees.salary%TYPE;
+    v_new_salary   Employees.salary%TYPE;
+    v_emp_name     Employees.employee_name%TYPE;
+BEGIN
+    SELECT salary, employee_name INTO v_old_salary, v_emp_name
+    FROM Employees
+    WHERE employee_id = p_employee_id;
+
+    v_new_salary := v_old_salary + (v_old_salary * p_percentage / 100);
+
+    UPDATE Employees
+    SET salary = v_new_salary
+    WHERE employee_id = p_employee_id;
+
+    COMMIT;
+    DBMS_OUTPUT.PUT_LINE('Salary updated for ' || v_emp_name ||
+                          ': $' || v_old_salary || ' -> $' || v_new_salary);
+
+EXCEPTION
+    WHEN NO_DATA_FOUND THEN
+        INSERT INTO ErrorLog (procedure_name, error_message)
+        VALUES ('UpdateSalary',
+                'Employee ID ' || p_employee_id || ' does not exist.');
+        COMMIT;
+        DBMS_OUTPUT.PUT_LINE('Error: Employee ID ' || p_employee_id || ' not found.');
+
+    WHEN OTHERS THEN
+        ROLLBACK;
+        INSERT INTO ErrorLog (procedure_name, error_message)
+        VALUES ('UpdateSalary', 'Unexpected error: ' || SQLERRM);
+        COMMIT;
+        DBMS_OUTPUT.PUT_LINE('Error: An unexpected error occurred.');
+END;
+/
+
+CREATE OR REPLACE PROCEDURE AddNewCustomer (
+    p_customer_id   IN NUMBER,
+    p_customer_name IN VARCHAR2,
+    p_balance       IN NUMBER
+) IS
+    v_dummy NUMBER;
+BEGIN
+    -- Proactive check for existing ID
+    SELECT customer_id INTO v_dummy
+    FROM Customers
+    WHERE customer_id = p_customer_id;
+
+    -- If no exception raised, the customer already exists
+    INSERT INTO ErrorLog (procedure_name, error_message)
+    VALUES ('AddNewCustomer',
+            'Customer ID ' || p_customer_id || ' already exists. Insertion prevented.');
+    COMMIT;
+    DBMS_OUTPUT.PUT_LINE('Error: Customer ID ' || p_customer_id || ' already exists.');
+
+EXCEPTION
+    WHEN NO_DATA_FOUND THEN
+        -- Customer does not exist, safe to insert
+        BEGIN
+            INSERT INTO Customers (customer_id, customer_name, balance)
+            VALUES (p_customer_id, p_customer_name, p_balance);
+
+            COMMIT;
+            DBMS_OUTPUT.PUT_LINE('Customer added successfully: ' ||
+                                  p_customer_name || ' (ID: ' || p_customer_id || ')');
+        EXCEPTION
+            WHEN OTHERS THEN
+                ROLLBACK;
+                INSERT INTO ErrorLog (procedure_name, error_message)
+                VALUES ('AddNewCustomer', 'Unexpected error during insert: ' || SQLERRM);
+                COMMIT;
+                DBMS_OUTPUT.PUT_LINE('Error: Failed to add customer due to an unexpected error.');
+        END;
+
+    WHEN OTHERS THEN
+        ROLLBACK;
+        INSERT INTO ErrorLog (procedure_name, error_message)
+        VALUES ('AddNewCustomer', 'Unexpected error: ' || SQLERRM);
+        COMMIT;
+        DBMS_OUTPUT.PUT_LINE('Error: An unexpected error occurred.');
+END;
+/
+

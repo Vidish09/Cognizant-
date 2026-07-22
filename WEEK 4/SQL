@@ -1,0 +1,71 @@
+DELIMITER $$
+
+CREATE FUNCTION CalculateAge(p_date_of_birth DATE)
+RETURNS INT
+DETERMINISTIC
+BEGIN
+    DECLARE v_age INT;
+    SET v_age = TIMESTAMPDIFF(YEAR, p_date_of_birth, CURDATE());
+    RETURN v_age;
+END$$
+
+DELIMITER ;
+
+
+
+DELIMITER $$
+
+CREATE FUNCTION CalculateMonthlyInstallment(
+    p_loan_amount DECIMAL(15,2),
+    p_annual_interest_rate DECIMAL(5,2),   -- e.g. 8.5 for 8.5%
+    p_duration_years INT
+)
+RETURNS DECIMAL(15,2)
+DETERMINISTIC
+BEGIN
+    DECLARE v_monthly_rate DECIMAL(10,8);
+    DECLARE v_num_payments INT;
+    DECLARE v_emi DECIMAL(15,2);
+
+    SET v_monthly_rate = (p_annual_interest_rate / 100) / 12;
+    SET v_num_payments = p_duration_years * 12;
+
+    IF v_monthly_rate = 0 THEN
+        -- Handle 0% interest to avoid division by zero
+        SET v_emi = p_loan_amount / v_num_payments;
+    ELSE
+        SET v_emi = p_loan_amount * v_monthly_rate * POWER(1 + v_monthly_rate, v_num_payments)
+                     / (POWER(1 + v_monthly_rate, v_num_payments) - 1);
+    END IF;
+
+    RETURN v_emi;
+END$$
+
+DELIMITER ;
+
+
+DELIMITER $$
+
+CREATE FUNCTION HasSufficientBalance(
+    p_account_id INT,
+    p_amount DECIMAL(15,2)
+)
+RETURNS BOOLEAN
+DETERMINISTIC
+READS SQL DATA
+BEGIN
+    DECLARE v_balance DECIMAL(15,2);
+
+    SELECT balance INTO v_balance
+    FROM Accounts
+    WHERE account_id = p_account_id;
+
+    IF v_balance IS NULL THEN
+        RETURN FALSE;
+    END IF;
+
+    RETURN v_balance >= p_amount;
+END$$
+
+DELIMITER ;
+

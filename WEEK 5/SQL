@@ -1,0 +1,60 @@
+DELIMITER $$
+
+CREATE TRIGGER UpdateCustomerLastModified
+BEFORE UPDATE ON Customers
+FOR EACH ROW
+BEGIN
+    SET NEW.LastModified = CURDATE();
+END$$
+
+DELIMITER ;
+
+DELIMITER $$
+
+CREATE TRIGGER LogTransaction
+AFTER INSERT ON Transactions
+FOR EACH ROW
+BEGIN
+    INSERT INTO AuditLog (transaction_id, account_id, transaction_type, amount, log_date)
+    VALUES (NEW.transaction_id, NEW.account_id, NEW.transaction_type, NEW.amount, NOW());
+END$$
+
+DELIMITER ;
+
+DELIMITER $$
+
+CREATE TRIGGER CheckTransactionRules
+BEFORE INSERT ON Transactions
+FOR EACH ROW
+BEGIN
+    DECLARE v_current_balance DECIMAL(15,2);
+
+    -- Rule 1: deposits must be positive
+    IF NEW.transaction_type = 'Deposit' AND NEW.amount <= 0 THEN
+        SIGNAL SQLSTATE '45000'
+            SET MESSAGE_TEXT = 'Deposit amount must be positive.';
+    END IF;
+
+    -- Rule 2: withdrawals must be positive and not exceed balance
+    IF NEW.transaction_type = 'Withdrawal' THEN
+        IF NEW.amount <= 0 THEN
+            SIGNAL SQLSTATE '45000'
+                SET MESSAGE_TEXT = 'Withdrawal amount must be positive.';
+        END IF;
+
+        SELECT balance INTO v_current_balance
+        FROM Accounts
+        WHERE account_id = NEW.account_id;
+
+        IF v_current_balance IS NULL THEN
+            SIGNAL SQLSTATE '45000'
+                SET MESSAGE_TEXT = 'Account does not exist.';
+        ELSEIF v_current_balance < NEW.amount THEN
+            SIGNAL SQLSTATE '45000'
+                SET MESSAGE_TEXT = 'Insufficient balance for withdrawal.';
+        END IF;
+    END IF;
+END$$
+
+DELIMITER ;
+

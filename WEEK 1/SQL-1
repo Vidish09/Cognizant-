@@ -1,0 +1,98 @@
+-- Customers table
+CREATE TABLE Customers (
+    customer_id     NUMBER PRIMARY KEY,
+    customer_name   VARCHAR2(50),
+    age             NUMBER,
+    balance         NUMBER,
+    is_vip          VARCHAR2(5) DEFAULT 'FALSE'
+);
+
+-- Loans table
+CREATE TABLE Loans (
+    loan_id         NUMBER PRIMARY KEY,
+    customer_id     NUMBER,
+    interest_rate   NUMBER,
+    due_date        DATE,
+    CONSTRAINT fk_customer FOREIGN KEY (customer_id) REFERENCES Customers(customer_id)
+);
+
+DECLARE
+    CURSOR cust_cursor IS
+        SELECT c.customer_id, c.customer_name, c.age, l.loan_id, l.interest_rate
+        FROM Customers c
+        JOIN Loans l ON c.customer_id = l.customer_id;
+
+    v_new_rate Loans.interest_rate%TYPE;
+BEGIN
+    FOR cust_rec IN cust_cursor LOOP
+        IF cust_rec.age > 60 THEN
+            v_new_rate := cust_rec.interest_rate - (cust_rec.interest_rate * 0.01);
+
+            UPDATE Loans
+            SET interest_rate = v_new_rate
+            WHERE loan_id = cust_rec.loan_id;
+
+            DBMS_OUTPUT.PUT_LINE(
+                'Customer: ' || cust_rec.customer_name ||
+                ' (Age: ' || cust_rec.age || ') - Interest rate updated from ' ||
+                cust_rec.interest_rate || '% to ' || ROUND(v_new_rate, 2) || '%'
+            );
+        END IF;
+    END LOOP;
+
+    COMMIT;
+    DBMS_OUTPUT.PUT_LINE('Loan discount process completed.');
+END;
+/
+
+DECLARE
+    CURSOR cust_cursor IS
+        SELECT customer_id, customer_name, balance, is_vip
+        FROM Customers;
+BEGIN
+    FOR cust_rec IN cust_cursor LOOP
+        IF cust_rec.balance > 10000 THEN
+            UPDATE Customers
+            SET is_vip = 'TRUE'
+            WHERE customer_id = cust_rec.customer_id;
+
+            DBMS_OUTPUT.PUT_LINE(
+                'Customer: ' || cust_rec.customer_name ||
+                ' (Balance: $' || cust_rec.balance || ') - Promoted to VIP'
+            );
+        ELSE
+            DBMS_OUTPUT.PUT_LINE(
+                'Customer: ' || cust_rec.customer_name ||
+                ' (Balance: $' || cust_rec.balance || ') - Not eligible for VIP'
+            );
+        END IF;
+    END LOOP;
+
+    COMMIT;
+    DBMS_OUTPUT.PUT_LINE('VIP status update completed.');
+END;
+/
+
+DECLARE
+    CURSOR due_loans_cursor IS
+        SELECT c.customer_name, l.loan_id, l.due_date
+        FROM Customers c
+        JOIN Loans l ON c.customer_id = l.customer_id
+        WHERE l.due_date BETWEEN SYSDATE AND (SYSDATE + 30);
+
+    v_days_remaining NUMBER;
+BEGIN
+    FOR loan_rec IN due_loans_cursor LOOP
+        v_days_remaining := TRUNC(loan_rec.due_date - SYSDATE);
+
+        DBMS_OUTPUT.PUT_LINE(
+            'Reminder: Dear ' || loan_rec.customer_name ||
+            ', your loan (ID: ' || loan_rec.loan_id ||
+            ') is due on ' || TO_CHAR(loan_rec.due_date, 'DD-MON-YYYY') ||
+            ' (' || v_days_remaining || ' days remaining).'
+        );
+    END LOOP;
+
+    DBMS_OUTPUT.PUT_LINE('Reminder process completed.');
+END;
+/
